@@ -1,5 +1,5 @@
 
-<html data-type="html" data-identifier="1169158f-0ec5-4209-bfbf-21833c13aa72" data-title="Invoice Generator" data-version="13" width="1000" height="1400"><head>
+<html data-type="html" data-identifier="1169158f-0ec5-4209-bfbf-21833c13aa72" data-title="Invoice Generator" data-version="14" width="1000" height="1400"><head>
 <meta charset="utf-8">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
@@ -50,6 +50,7 @@
   .toolbar button:hover { opacity: .85; }
   .toolbar button:disabled { opacity: .5; cursor: default; }
   .btn-primary { background: var(--teal); color: #fff; }
+  .btn-accent { background: var(--gold); color: #fff; }
   .btn-light { background: #fff; color: var(--teal); border: 1px solid var(--gold-soft); }
 
   .invoice {
@@ -371,7 +372,6 @@
   .invoice.exporting tbody td.actcol { display: none; }
   .invoice.exporting tbody td { vertical-align: top; }
   .invoice.exporting td.item { overflow: visible; }
-  /* Plain-text replacements that wrap properly during capture */
   .export-text {
     width: 100%;
     word-break: break-word;
@@ -415,6 +415,7 @@
     <button class="btn-light" id="add-item-btn">+ Add Item</button>
     <button class="btn-light" id="reset-btn">Reset</button>
     <button class="btn-light" id="print-btn">Print</button>
+    <button class="btn-accent" id="share-btn">Share</button>
     <button class="btn-primary" id="pdf-btn">Download PDF</button>
   </div>
 
@@ -603,8 +604,6 @@ Cape Town, 7806</textarea>
     clone.style.width = invoice.offsetWidth + 'px';
     clone.style.boxShadow = 'none';
 
-    // cloneNode doesn't copy live field values, so copy them across and
-    // convert each input/textarea into a plain <div> that wraps text.
     var origFields = invoice.querySelectorAll('input, textarea');
     var cloneFields = clone.querySelectorAll('input, textarea');
     var copyProps = ['fontFamily','fontSize','fontWeight','fontStyle','color',
@@ -614,36 +613,21 @@ Cape Town, 7806</textarea>
       var orig = origFields[i];
       var cf = cloneFields[i];
       var cs = window.getComputedStyle(orig);
-
       var div = document.createElement('div');
       div.className = 'export-text';
       div.textContent = orig.value;
-
       for (var p = 0; p < copyProps.length; p++) {
         div.style[copyProps[p]] = cs[copyProps[p]];
       }
       div.style.lineHeight = '1.5';
       div.style.whiteSpace = (orig.tagName === 'TEXTAREA') ? 'pre-wrap' : 'normal';
-
       cf.parentNode.replaceChild(div, cf);
     }
     return clone;
   }
 
-  // Backup: native print -> "Save as PDF" destination
-  document.getElementById('print-btn').addEventListener('click', function () {
-    window.print();
-  });
-
-  // One-click PDF download (free, via html2canvas + jsPDF)
-  document.getElementById('pdf-btn').addEventListener('click', function () {
-    var btn = this;
-    var fileName = buildFileName();
-    var original = btn.textContent;
-
-    btn.disabled = true;
-    btn.textContent = 'Generating…';
-
+  // ---- Core: build the jsPDF document, hand it back via callback ----
+  function generatePdf(onReady, onError) {
     var clone = buildExportClone();
     document.body.appendChild(clone);
 
@@ -657,10 +641,9 @@ Cape Town, 7806</textarea>
       }).then(function (canvas) {
         var imgData = canvas.toDataURL('image/jpeg', 0.95);
         var pdf = new window.jspdf.jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
-        var pageWidth = pdf.internal.pageSize.getWidth();   // 210mm
-        var pageHeight = pdf.internal.pageSize.getHeight(); // 297mm
+        var pageWidth = pdf.internal.pageSize.getWidth();
+        var pageHeight = pdf.internal.pageSize.getHeight();
         var fullImgHeight = canvas.height * pageWidth / canvas.width;
-
         var SINGLE_PAGE_MAX = pageHeight * 1.45;
 
         if (fullImgHeight <= pageHeight + 1) {
@@ -682,16 +665,74 @@ Cape Town, 7806</textarea>
             heightLeft -= pageHeight;
           }
         }
-
-        pdf.save(fileName);
+        if (clone.parentNode) { clone.parentNode.removeChild(clone); }
+        onReady(pdf);
       }).catch(function (err) {
-        window.alert('PDF generation hit a snag — this is usually the header image blocking it. Please use the "Print" button as a backup (choose "Save as PDF" as the destination).');
-      }).then(function () {
-        if (clone && clone.parentNode) { clone.parentNode.removeChild(clone); }
-        btn.disabled = false;
-        btn.textContent = original;
+        if (clone.parentNode) { clone.parentNode.removeChild(clone); }
+        if (onError) { onError(err); }
       });
     }, 80);
+  }
+
+  function withBusy(btn, fn) {
+    var original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Generating…';
+    fn(function done() {
+      btn.disabled = false;
+      btn.textContent = original;
+    });
+  }
+
+  // Backup: native print -> "Save as PDF" destination
+  document.getElementById('print-btn').addEventListener('click', function () {
+    window.print();
+  });
+
+  // Download PDF (desktop-friendly)
+  document.getElementById('pdf-btn').addEventListener('click', function () {
+    var btn = this;
+    var fileName = buildFileName();
+    withBusy(btn, function (done) {
+      generatePdf(function (pdf) {
+        pdf.save(fileName);
+        done();
+      }, function () {
+        window.alert('PDF generation hit a snag — usually the header image. Please use the "Print" button as a backup (choose "Save as PDF").');
+        done();
+      });
+    });
+  });
+
+  // Share PDF as a real file attachment (no blob: link)
+  document.getElementById('share-btn').addEventListener('click', function () {
+    var btn = this;
+    var fileName = buildFileName();
+    withBusy(btn, function (done) {
+      generatePdf(function (pdf) {
+        var blob = pdf.output('blob');
+        var file = new File([blob], fileName, { type: 'application/pdf' });
+
+        // Use Web Share API with FILES only (no url -> no blob link in the message)
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          navigator.share({
+            files: [file],
+            title: fileName.replace('.pdf', '')
+            // intentionally NO 'url' and NO 'text' so nothing extra is attached
+          }).catch(function () {
+            /* user cancelled the share sheet - nothing to do */
+          }).then(function () { done(); });
+        } else {
+          // Desktop / unsupported: fall back to a normal download
+          pdf.save(fileName);
+          window.alert('Direct sharing isn’t supported on this device, so the PDF was downloaded instead. You can attach it to your message manually.');
+          done();
+        }
+      }, function () {
+        window.alert('PDF generation hit a snag — usually the header image. Please use the "Print" button as a backup (choose "Save as PDF").');
+        done();
+      });
+    });
   });
 
   createRow('Protea Photo - Framed (LH2505000003)', 1, 1850);

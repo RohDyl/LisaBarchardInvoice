@@ -1,5 +1,5 @@
 
-<html data-type="html" data-identifier="1169158f-0ec5-4209-bfbf-21833c13aa72" data-title="Invoice Generator" data-version="5" width="1000" height="1620" imagemodel="imagen-4"><head>
+<html data-type="html" data-identifier="1169158f-0ec5-4209-bfbf-21833c13aa72" data-title="Invoice Generator" data-version="7" width="1000" height="1560"><head>
 <meta charset="utf-8">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
@@ -60,7 +60,7 @@
     overflow: hidden;
   }
 
-  /* Header banner with uploaded image (gradient fallback behind) */
+  /* Header banner with hosted image (gradient fallback behind) */
   .banner {
     position: relative;
     width: 100%;
@@ -200,6 +200,7 @@
   thead th.num { text-align: right; }
   thead th.actcol { width: 34px; }
   tbody td { padding: 7px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  tbody tr { break-inside: avoid; page-break-inside: avoid; }
   tbody td input {
     width: 100%;
     border: 1px solid transparent;
@@ -232,7 +233,7 @@
   }
   .row-remove:hover { background: #f0e3e3; color: #b03030; }
 
-  .totals { display: flex; justify-content: flex-end; margin-top: 18px; }
+  .totals { display: flex; justify-content: flex-end; margin-top: 18px; break-inside: avoid; page-break-inside: avoid; }
   .totals-inner { width: 300px; }
   .totals-line {
     display: flex;
@@ -257,15 +258,6 @@
     letter-spacing: 2px;
     align-self: center;
   }
-  .vat-row input {
-    width: 52px;
-    text-align: right;
-    border: 1px solid var(--line);
-    border-radius: 2px;
-    font-family: 'Jost', sans-serif;
-    font-size: 13px;
-    padding: 2px 4px;
-  }
 
   /* Banking / payment panel */
   .payment-panel {
@@ -275,6 +267,8 @@
     border-radius: 2px;
     background: rgba(187,138,60,.05);
     padding: 22px 26px;
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
   .payment-panel h3 {
     font-family: 'Jost', sans-serif;
@@ -340,6 +334,8 @@
   .business-block {
     margin-top: 22px;
     text-align: center;
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
   .business-block .biz-name {
     font-family: 'Playfair Display', Georgia, serif;
@@ -364,15 +360,28 @@
     line-height: 1.9;
   }
 
+  /* ---------- PRINT / SAVE-AS-PDF RULES ---------- */
+  @page {
+    size: A4;
+    margin: 14mm;
+  }
   @media print {
-    body { background: #fff; padding: 0; }
+    html, body { background: #fff; padding: 0; margin: 0; }
     .toolbar { display: none !important; }
-    .invoice { box-shadow: none; max-width: 100%; }
+    .invoice {
+      box-shadow: none;
+      max-width: 100%;
+      border-radius: 0;
+      padding-bottom: 0;
+    }
+    .body-pad { padding: 0 6mm; }
     textarea, input { background: transparent !important; border-color: transparent !important; }
     .row-remove { display: none; }
     thead th.actcol, tbody td.actcol { display: none; }
-    .vat-row input { border-color: transparent; }
     .payment-panel { background: transparent; }
+    thead { display: table-header-group; }
+    tfoot { display: table-footer-group; }
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   }
 </style>
 </head>
@@ -385,9 +394,9 @@
   </div>
 
   <div class="invoice" id="invoice">
-    <!-- Header banner (uploaded image) with gradient fallback -->
+    <!-- Header banner: hosted image (GitHub raw) with gradient fallback -->
     <div class="banner">
-      <img width="1600" height="420" data-src="HeaderImage" alt="Lisa Barchard header">
+      <img width="1600" height="420" src="https://raw.githubusercontent.com/RohDyl/LisaBarchardInvoice/088fa61cd2bea2651d01d6ea1c2d253be5a8cd84/HeaderImage" alt="Lisa Barchard header">
     </div>
 
     <!-- Wordmark -->
@@ -439,14 +448,6 @@ Cape Town, 7806</textarea>
 
       <div class="totals">
         <div class="totals-inner">
-          <div class="totals-line">
-            <span>Subtotal</span>
-            <span id="subtotal">R 0</span>
-          </div>
-          <div class="totals-line vat-row">
-            <span>VAT (<input type="number" id="vat-rate" value="0" min="0" max="100">%)</span>
-            <span id="vat-amount">R 0</span>
-          </div>
           <div class="totals-line grand">
             <span>Total</span>
             <span id="grand-total">R 0</span>
@@ -512,23 +513,18 @@ Cape Town, 7806</textarea>
 
   function recalc() {
     var rows = itemsBody.querySelectorAll('tr');
-    var subtotal = 0;
+    var total = 0;
     rows.forEach(function (row) {
       var qty = parseFloat(row.querySelector('.qty-input').value) || 0;
       var price = parseFloat(row.querySelector('.price-input').value) || 0;
       var line = qty * price;
-      subtotal += line;
+      total += line;
       row.querySelector('.linetotal').textContent = fmt(line);
     });
-    var vatRate = parseFloat(document.getElementById('vat-rate').value) || 0;
-    var vatAmount = subtotal * (vatRate / 100);
-    document.getElementById('subtotal').textContent = fmt(subtotal);
-    document.getElementById('vat-amount').textContent = fmt(vatAmount);
-    document.getElementById('grand-total').textContent = fmt(subtotal + vatAmount);
+    document.getElementById('grand-total').textContent = fmt(total);
   }
 
   itemsBody.addEventListener('input', recalc);
-  document.getElementById('vat-rate').addEventListener('input', recalc);
 
   itemsBody.addEventListener('click', function (e) {
     if (e.target.classList.contains('row-remove')) {
@@ -543,7 +539,6 @@ Cape Town, 7806</textarea>
 
   document.getElementById('reset-btn').addEventListener('click', function () {
     itemsBody.innerHTML = '';
-    document.getElementById('vat-rate').value = 0;
     createRow('', 1, 0);
   });
 

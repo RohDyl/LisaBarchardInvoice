@@ -1,5 +1,5 @@
 
-<html data-type="html" data-identifier="1169158f-0ec5-4209-bfbf-21833c13aa72" data-title="Invoice Generator" data-version="12" width="1000" height="1400"><head>
+<html data-type="html" data-identifier="1169158f-0ec5-4209-bfbf-21833c13aa72" data-title="Invoice Generator" data-version="13" width="1000" height="1400"><head>
 <meta charset="utf-8">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
@@ -168,12 +168,12 @@
     border-radius: 2px;
     font-family: 'Cormorant Garamond', Georgia, serif;
     font-size: 14px;
-    line-height: 1.45;
+    line-height: 1.5;
     color: var(--ink);
     resize: vertical;
     padding: 5px 7px;
     background: rgba(187,138,60,.06);
-    min-height: 108px;
+    min-height: 118px;
   }
   .meta-block input.date-field {
     border: 1px solid transparent;
@@ -363,14 +363,22 @@
     line-height: 1.8;
   }
 
-  /* ---------- EXPORT MODE (applied while generating the PDF) ---------- */
+  /* ---------- EXPORT MODE (applied to the off-screen clone) ---------- */
   .invoice.exporting { box-shadow: none; }
-  .invoice.exporting textarea,
-  .invoice.exporting input { background: transparent !important; border-color: transparent !important; }
   .invoice.exporting .payment-panel { background: transparent; }
   .invoice.exporting .row-remove { display: none; }
   .invoice.exporting thead th.actcol,
   .invoice.exporting tbody td.actcol { display: none; }
+  .invoice.exporting tbody td { vertical-align: top; }
+  .invoice.exporting td.item { overflow: visible; }
+  /* Plain-text replacements that wrap properly during capture */
+  .export-text {
+    width: 100%;
+    word-break: break-word;
+    overflow-wrap: break-word;
+    background: transparent;
+    border: 1px solid transparent;
+  }
 
   /* ---------- PRINT / SAVE-AS-PDF RULES (backup Print button) ---------- */
   @page {
@@ -568,15 +576,12 @@ Cape Town, 7806</textarea>
       .replace(/_+/g, '_')
       .replace(/^_+|_+$/g, '');
   }
-
   function pad(n) { return String(n).padStart(2, '0'); }
-
   function formatDateDDMMYYYY(raw) {
     var d = new Date(raw);
     if (isNaN(d.getTime())) { d = new Date(); }
     return pad(d.getDate()) + pad(d.getMonth() + 1) + d.getFullYear();
   }
-
   function buildFileName() {
     var preparedFor = document.getElementById('prepared-for').value || '';
     var firstLine = preparedFor.split('\n').map(function (l) { return l.trim(); })
@@ -587,6 +592,44 @@ Cape Town, 7806</textarea>
     return recipient + '_' + invNo + '_' + dateStr + '.pdf';
   }
 
+  // ---- Build an off-screen clone where inputs become wrapping text ----
+  function buildExportClone() {
+    var invoice = document.getElementById('invoice');
+    var clone = invoice.cloneNode(true);
+    clone.classList.add('exporting');
+    clone.style.position = 'absolute';
+    clone.style.left = '-10000px';
+    clone.style.top = '0';
+    clone.style.width = invoice.offsetWidth + 'px';
+    clone.style.boxShadow = 'none';
+
+    // cloneNode doesn't copy live field values, so copy them across and
+    // convert each input/textarea into a plain <div> that wraps text.
+    var origFields = invoice.querySelectorAll('input, textarea');
+    var cloneFields = clone.querySelectorAll('input, textarea');
+    var copyProps = ['fontFamily','fontSize','fontWeight','fontStyle','color',
+                     'textAlign','letterSpacing','padding'];
+
+    for (var i = 0; i < origFields.length; i++) {
+      var orig = origFields[i];
+      var cf = cloneFields[i];
+      var cs = window.getComputedStyle(orig);
+
+      var div = document.createElement('div');
+      div.className = 'export-text';
+      div.textContent = orig.value;
+
+      for (var p = 0; p < copyProps.length; p++) {
+        div.style[copyProps[p]] = cs[copyProps[p]];
+      }
+      div.style.lineHeight = '1.5';
+      div.style.whiteSpace = (orig.tagName === 'TEXTAREA') ? 'pre-wrap' : 'normal';
+
+      cf.parentNode.replaceChild(div, cf);
+    }
+    return clone;
+  }
+
   // Backup: native print -> "Save as PDF" destination
   document.getElementById('print-btn').addEventListener('click', function () {
     window.print();
@@ -595,16 +638,17 @@ Cape Town, 7806</textarea>
   // One-click PDF download (free, via html2canvas + jsPDF)
   document.getElementById('pdf-btn').addEventListener('click', function () {
     var btn = this;
-    var invoice = document.getElementById('invoice');
     var fileName = buildFileName();
     var original = btn.textContent;
 
     btn.disabled = true;
     btn.textContent = 'Generating…';
-    invoice.classList.add('exporting');
+
+    var clone = buildExportClone();
+    document.body.appendChild(clone);
 
     setTimeout(function () {
-      html2canvas(invoice, {
+      html2canvas(clone, {
         scale: 2,
         useCORS: true,
         backgroundColor: '#ffffff',
@@ -617,21 +661,16 @@ Cape Town, 7806</textarea>
         var pageHeight = pdf.internal.pageSize.getHeight(); // 297mm
         var fullImgHeight = canvas.height * pageWidth / canvas.width;
 
-        // If content is roughly one page (even if it slightly overflows,
-        // which is common on phones), squeeze it onto a SINGLE A4 page.
         var SINGLE_PAGE_MAX = pageHeight * 1.45;
 
         if (fullImgHeight <= pageHeight + 1) {
-          // Fits naturally on one page
           pdf.addImage(imgData, 'JPEG', 0, 0, pageWidth, fullImgHeight);
         } else if (fullImgHeight <= SINGLE_PAGE_MAX) {
-          // Slight overflow -> scale down to fit exactly one page, centered
           var scaledHeight = pageHeight;
           var scaledWidth = canvas.width * scaledHeight / canvas.height;
           var x = (pageWidth - scaledWidth) / 2;
           pdf.addImage(imgData, 'JPEG', x, 0, scaledWidth, scaledHeight);
         } else {
-          // Genuinely long invoice -> paginate across multiple A4 pages
           var heightLeft = fullImgHeight;
           var position = 0;
           pdf.addImage(imgData, 'JPEG', 0, position, pageWidth, fullImgHeight);
@@ -648,11 +687,11 @@ Cape Town, 7806</textarea>
       }).catch(function (err) {
         window.alert('PDF generation hit a snag — this is usually the header image blocking it. Please use the "Print" button as a backup (choose "Save as PDF" as the destination).');
       }).then(function () {
-        invoice.classList.remove('exporting');
+        if (clone && clone.parentNode) { clone.parentNode.removeChild(clone); }
         btn.disabled = false;
         btn.textContent = original;
       });
-    }, 60);
+    }, 80);
   });
 
   createRow('Protea Photo - Framed (LH2505000003)', 1, 1850);

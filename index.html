@@ -1,5 +1,5 @@
 
-<html data-type="html" data-identifier="1169158f-0ec5-4209-bfbf-21833c13aa72" data-title="Invoice Generator" data-version="14" width="1000" height="1400"><head>
+<html data-type="html" data-identifier="1169158f-0ec5-4209-bfbf-21833c13aa72" data-title="Invoice Generator" data-version="15" width="1000" height="1400"><head>
 <meta charset="utf-8">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
@@ -146,6 +146,27 @@
     color: var(--ink);
     background: transparent;
   }
+
+  /* Update-status badges (on-screen only) */
+  .update-flag {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    font-family: 'Jost', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    color: #fff;
+    margin-left: 5px;
+    vertical-align: middle;
+    cursor: help;
+    user-select: none;
+  }
+  .update-flag.pending { background: #c0392b; }
+  .update-flag.done { background: #2e7d4f; }
 
   .meta-row {
     display: flex;
@@ -388,6 +409,7 @@
   @media print {
     html, body { background: #fff; padding: 0; margin: 0; }
     .toolbar { display: none !important; }
+    .update-flag { display: none !important; }
     .invoice {
       box-shadow: none;
       max-width: 100%;
@@ -436,7 +458,7 @@
       <div class="invoice-top">
         <h1 id="doc-title">Sales Invoice</h1>
         <div class="inv-no-wrap">
-          <p id="inv-no-label">Invoice</p>
+          <p id="inv-no-label">Invoice <span class="update-flag pending" id="flag-invno" title="Remember to update the invoice number for this invoice">✗</span></p>
           <span class="hash">No.</span><input type="text" id="inv-number" value="08">
         </div>
       </div>
@@ -452,7 +474,7 @@ Constantia Heights
 Cape Town, 7806</textarea>
         </div>
         <div class="meta-block">
-          <span class="meta-label">Prepared Date</span>
+          <span class="meta-label">Prepared Date <span class="update-flag pending" id="flag-date" title="Remember to update the date for this invoice">✗</span></span>
           <input type="text" class="date-field" id="prepared-date" value="5 June 2026">
         </div>
       </div>
@@ -568,6 +590,34 @@ Cape Town, 7806</textarea>
     createRow('', 1, 0);
   });
 
+  // ---- Update-status badges: red ✗ until the field is changed, then green ✓ ----
+  function setupUpdateFlags() {
+    var configs = [
+      { fieldId: 'inv-number',   flagId: 'flag-invno', label: 'invoice number' },
+      { fieldId: 'prepared-date', flagId: 'flag-date',  label: 'date' }
+    ];
+    configs.forEach(function (cfg) {
+      var field = document.getElementById(cfg.fieldId);
+      var flag = document.getElementById(cfg.flagId);
+      var initial = field.value;
+
+      function refresh() {
+        var changed = field.value.trim() !== '' && field.value !== initial;
+        if (changed) {
+          flag.className = 'update-flag done';
+          flag.textContent = '✓';
+          flag.title = 'Updated for this invoice';
+        } else {
+          flag.className = 'update-flag pending';
+          flag.textContent = '✗';
+          flag.title = 'Remember to update the ' + cfg.label + ' for this invoice';
+        }
+      }
+      field.addEventListener('input', refresh);
+      refresh();
+    });
+  }
+
   // ---- Filename builder: recipient_invoice#_DDMMYYYY ----
   function sanitize(str) {
     return (str || '')
@@ -603,6 +653,12 @@ Cape Town, 7806</textarea>
     clone.style.top = '0';
     clone.style.width = invoice.offsetWidth + 'px';
     clone.style.boxShadow = 'none';
+
+    // Remove the on-screen status badges so they never appear in the PDF
+    var flags = clone.querySelectorAll('.update-flag');
+    for (var f = 0; f < flags.length; f++) {
+      flags[f].parentNode.removeChild(flags[f]);
+    }
 
     var origFields = invoice.querySelectorAll('input, textarea');
     var cloneFields = clone.querySelectorAll('input, textarea');
@@ -713,17 +769,14 @@ Cape Town, 7806</textarea>
         var blob = pdf.output('blob');
         var file = new File([blob], fileName, { type: 'application/pdf' });
 
-        // Use Web Share API with FILES only (no url -> no blob link in the message)
         if (navigator.canShare && navigator.canShare({ files: [file] })) {
           navigator.share({
             files: [file],
             title: fileName.replace('.pdf', '')
-            // intentionally NO 'url' and NO 'text' so nothing extra is attached
           }).catch(function () {
-            /* user cancelled the share sheet - nothing to do */
+            /* user cancelled - nothing to do */
           }).then(function () { done(); });
         } else {
-          // Desktop / unsupported: fall back to a normal download
           pdf.save(fileName);
           window.alert('Direct sharing isn’t supported on this device, so the PDF was downloaded instead. You can attach it to your message manually.');
           done();
@@ -735,6 +788,7 @@ Cape Town, 7806</textarea>
     });
   });
 
+  setupUpdateFlags();
   createRow('Protea Photo - Framed (LH2505000003)', 1, 1850);
 })();
 </script>

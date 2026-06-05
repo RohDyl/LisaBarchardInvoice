@@ -1,9 +1,11 @@
 
-<html data-type="html" data-identifier="1169158f-0ec5-4209-bfbf-21833c13aa72" data-title="Invoice Generator" data-version="9" width="1000" height="1400"><head>
+<html data-type="html" data-identifier="1169158f-0ec5-4209-bfbf-21833c13aa72" data-title="Invoice Generator" data-version="12" width="1000" height="1400"><head>
 <meta charset="utf-8">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&amp;family=Playfair+Display:wght@500;600;700&amp;family=Jost:wght@300;400;500&amp;display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
   :root {
     --teal: #1d5a64;
@@ -46,6 +48,7 @@
   }
   .toolbar button:active { transform: translateY(1px); }
   .toolbar button:hover { opacity: .85; }
+  .toolbar button:disabled { opacity: .5; cursor: default; }
   .btn-primary { background: var(--teal); color: #fff; }
   .btn-light { background: #fff; color: var(--teal); border: 1px solid var(--gold-soft); }
 
@@ -184,7 +187,7 @@
   }
   textarea:focus, input:focus { outline: none; border-color: var(--teal) !important; background: #fff; }
 
-  table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 10px; table-layout: fixed; }
   thead th {
     background: var(--teal);
     color: #fff;
@@ -197,8 +200,9 @@
     padding: 10px 10px;
   }
   thead th.num { text-align: right; }
-  thead th.actcol { width: 30px; }
+  thead th.actcol { width: 28px; }
   tbody td { padding: 5px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  tbody td.item { overflow: hidden; }
   tbody tr { break-inside: avoid; page-break-inside: avoid; }
   tbody td input {
     width: 100%;
@@ -359,7 +363,16 @@
     line-height: 1.8;
   }
 
-  /* ---------- PRINT / SAVE-AS-PDF RULES ---------- */
+  /* ---------- EXPORT MODE (applied while generating the PDF) ---------- */
+  .invoice.exporting { box-shadow: none; }
+  .invoice.exporting textarea,
+  .invoice.exporting input { background: transparent !important; border-color: transparent !important; }
+  .invoice.exporting .payment-panel { background: transparent; }
+  .invoice.exporting .row-remove { display: none; }
+  .invoice.exporting thead th.actcol,
+  .invoice.exporting tbody td.actcol { display: none; }
+
+  /* ---------- PRINT / SAVE-AS-PDF RULES (backup Print button) ---------- */
   @page {
     size: A4;
     margin: 12mm;
@@ -393,13 +406,14 @@
   <div class="toolbar">
     <button class="btn-light" id="add-item-btn">+ Add Item</button>
     <button class="btn-light" id="reset-btn">Reset</button>
-    <button class="btn-primary" id="pdf-btn">Save as PDF</button>
+    <button class="btn-light" id="print-btn">Print</button>
+    <button class="btn-primary" id="pdf-btn">Download PDF</button>
   </div>
 
   <div class="invoice" id="invoice">
     <!-- Header banner: hosted image (GitHub raw) with gradient fallback -->
     <div class="banner">
-      <img width="1600" height="420" src="https://raw.githubusercontent.com/RohDyl/LisaBarchardInvoice/088fa61cd2bea2651d01d6ea1c2d253be5a8cd84/HeaderImage" alt="Lisa Barchard header">
+      <img width="1600" height="420" crossorigin="anonymous" src="https://raw.githubusercontent.com/RohDyl/LisaBarchardInvoice/088fa61cd2bea2651d01d6ea1c2d253be5a8cd84/HeaderImage" alt="Lisa Barchard header">
     </div>
 
     <!-- Wordmark -->
@@ -438,9 +452,9 @@ Cape Town, 7806</textarea>
         <thead>
           <tr>
             <th>Item</th>
-            <th class="num" style="width:64px;">Qty</th>
-            <th class="num" style="width:110px;">Price</th>
-            <th class="num" style="width:110px;">Total</th>
+            <th class="num" style="width:44px;">Qty</th>
+            <th class="num" style="width:90px;">Price</th>
+            <th class="num" style="width:96px;">Total</th>
             <th class="actcol"></th>
           </tr>
         </thead>
@@ -545,8 +559,100 @@ Cape Town, 7806</textarea>
     createRow('', 1, 0);
   });
 
-  document.getElementById('pdf-btn').addEventListener('click', function () {
+  // ---- Filename builder: recipient_invoice#_DDMMYYYY ----
+  function sanitize(str) {
+    return (str || '')
+      .trim()
+      .replace(/[^\w\s-]/g, '')
+      .replace(/\s+/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/^_+|_+$/g, '');
+  }
+
+  function pad(n) { return String(n).padStart(2, '0'); }
+
+  function formatDateDDMMYYYY(raw) {
+    var d = new Date(raw);
+    if (isNaN(d.getTime())) { d = new Date(); }
+    return pad(d.getDate()) + pad(d.getMonth() + 1) + d.getFullYear();
+  }
+
+  function buildFileName() {
+    var preparedFor = document.getElementById('prepared-for').value || '';
+    var firstLine = preparedFor.split('\n').map(function (l) { return l.trim(); })
+                               .filter(function (l) { return l.length; })[0] || 'Invoice';
+    var recipient = sanitize(firstLine);
+    var invNo = sanitize(document.getElementById('inv-number').value) || 'NA';
+    var dateStr = formatDateDDMMYYYY(document.getElementById('prepared-date').value);
+    return recipient + '_' + invNo + '_' + dateStr + '.pdf';
+  }
+
+  // Backup: native print -> "Save as PDF" destination
+  document.getElementById('print-btn').addEventListener('click', function () {
     window.print();
+  });
+
+  // One-click PDF download (free, via html2canvas + jsPDF)
+  document.getElementById('pdf-btn').addEventListener('click', function () {
+    var btn = this;
+    var invoice = document.getElementById('invoice');
+    var fileName = buildFileName();
+    var original = btn.textContent;
+
+    btn.disabled = true;
+    btn.textContent = 'Generating…';
+    invoice.classList.add('exporting');
+
+    setTimeout(function () {
+      html2canvas(invoice, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        logging: false,
+        imageTimeout: 15000
+      }).then(function (canvas) {
+        var imgData = canvas.toDataURL('image/jpeg', 0.95);
+        var pdf = new window.jspdf.jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+        var pageWidth = pdf.internal.pageSize.getWidth();   // 210mm
+        var pageHeight = pdf.internal.pageSize.getHeight(); // 297mm
+        var fullImgHeight = canvas.height * pageWidth / canvas.width;
+
+        // If content is roughly one page (even if it slightly overflows,
+        // which is common on phones), squeeze it onto a SINGLE A4 page.
+        var SINGLE_PAGE_MAX = pageHeight * 1.45;
+
+        if (fullImgHeight <= pageHeight + 1) {
+          // Fits naturally on one page
+          pdf.addImage(imgData, 'JPEG', 0, 0, pageWidth, fullImgHeight);
+        } else if (fullImgHeight <= SINGLE_PAGE_MAX) {
+          // Slight overflow -> scale down to fit exactly one page, centered
+          var scaledHeight = pageHeight;
+          var scaledWidth = canvas.width * scaledHeight / canvas.height;
+          var x = (pageWidth - scaledWidth) / 2;
+          pdf.addImage(imgData, 'JPEG', x, 0, scaledWidth, scaledHeight);
+        } else {
+          // Genuinely long invoice -> paginate across multiple A4 pages
+          var heightLeft = fullImgHeight;
+          var position = 0;
+          pdf.addImage(imgData, 'JPEG', 0, position, pageWidth, fullImgHeight);
+          heightLeft -= pageHeight;
+          while (heightLeft > 0) {
+            position = heightLeft - fullImgHeight;
+            pdf.addPage();
+            pdf.addImage(imgData, 'JPEG', 0, position, pageWidth, fullImgHeight);
+            heightLeft -= pageHeight;
+          }
+        }
+
+        pdf.save(fileName);
+      }).catch(function (err) {
+        window.alert('PDF generation hit a snag — this is usually the header image blocking it. Please use the "Print" button as a backup (choose "Save as PDF" as the destination).');
+      }).then(function () {
+        invoice.classList.remove('exporting');
+        btn.disabled = false;
+        btn.textContent = original;
+      });
+    }, 60);
   });
 
   createRow('Protea Photo - Framed (LH2505000003)', 1, 1850);
